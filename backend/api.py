@@ -69,7 +69,7 @@ def top_k_logits(logits, k):
 
 @register_api(name='gpt-2-small')
 class LM(AbstractLanguageChecker):
-    def __init__(self, model_name_or_path="gpt2"):
+    def __init__(self, model_name_or_path="/data/pradeesh/detecting-fake-text/pytorch/"):
         super(LM, self).__init__()
         self.enc = GPT2Tokenizer.from_pretrained(model_name_or_path)
         self.model = GPT2LMHeadModel.from_pretrained(model_name_or_path)
