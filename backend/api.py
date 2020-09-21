@@ -69,6 +69,67 @@ def top_k_logits(logits, k):
 
 @register_api(name='gpt-2-small')
 class LM(AbstractLanguageChecker):
+    def __init__(self, model_name_or_path="gpt2"):
+        super(LM, self).__init__()
+        self.enc = GPT2Tokenizer.from_pretrained(model_name_or_path)
+        self.model = GPT2LMHeadModel.from_pretrained(model_name_or_path)
+        self.model.to(self.device)
+        self.model.eval()
+        self.start_token = '<|endoftext|>'
+        print("Loaded GPT-2 model!")
+
+    def check_probabilities(self, in_text, topk=40):
+        # Process input
+        start_t = torch.full((1, 1),
+                             self.enc.encoder[self.start_token],
+                             device=self.device,
+                             dtype=torch.long)
+        context = self.enc.encode(in_text)
+        context = torch.tensor(context,
+                               device=self.device,
+                               dtype=torch.long).unsqueeze(0)
+        context = torch.cat([start_t, context], dim=1)
+        # Forward through the model
+        logits, _ = self.model(context)
+
+        # construct target and pred
+        yhat = torch.softmax(logits[0, :-1], dim=-1)
+        y = context[0, 1:]
+        # Sort the predictions for each timestep
+        sorted_preds = np.argsort(-yhat.data.cpu().numpy())
+        # [(pos, prob), ...]
+        real_topk_pos = list(
+            [int(np.where(sorted_preds[i] == y[i].item())[0][0])
+             for i in range(y.shape[0])])
+        real_topk_probs = yhat[np.arange(
+            0, y.shape[0], 1), y].data.cpu().numpy().tolist()
+        real_topk_probs = list(map(lambda x: round(x, 5), real_topk_probs))
+
+        real_topk = list(zip(real_topk_pos, real_topk_probs))
+        # [str, str, ...]
+        bpe_strings = [self.enc.decoder[s.item()] for s in context[0]]
+
+        bpe_strings = [self.postprocess(s) for s in bpe_strings]
+
+        # [[(pos, prob), ...], [(pos, prob), ..], ...]
+        pred_topk = [
+            list(zip([self.enc.decoder[p] for p in sorted_preds[i][:topk]],
+                     list(map(lambda x: round(x, 5),
+                              yhat[i][sorted_preds[i][
+                                      :topk]].data.cpu().numpy().tolist()))))
+            for i in range(y.shape[0])]
+
+        pred_topk = [[(self.postprocess(t[0]), t[1]) for t in pred] for pred in pred_topk]
+        payload = {'bpe_strings': bpe_strings,
+                   'real_topk': real_topk,
+                   'pred_topk': pred_topk}
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        return payload
+
+@register_api(name='amazon')
+class LM(AbstractLanguageChecker):
     def __init__(self, model_name_or_path="/data/pradeesh/detecting-fake-text/pytorch/"):
         super(LM, self).__init__()
         self.enc = GPT2Tokenizer.from_pretrained(model_name_or_path)
